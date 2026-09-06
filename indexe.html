@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Runner Game HD</title>
+<style>
+body{
+  margin:0;
+  background:#000;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+}
+canvas{
+  border-radius:22px;
+  box-shadow:0 30px 70px rgba(0,0,0,0.8);
+}
+</style>
+</head>
+<body>
+
+<canvas id="game" width="360" height="520"></canvas>
+
+<audio id="jumpS" src="https://actions.google.com/sounds/v1/cartoon/slide_whistle_to_drum_hit.ogg"></audio>
+<audio id="hitS" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"></audio>
+<audio id="btnS" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg"></audio>
+<audio id="bgm" src="https://actions.google.com/sounds/v1/ambiences/wind_whistling.ogg" loop></audio>
+
+<script>
+const c = document.getElementById("game");
+const ctx = c.getContext("2d");
+
+const jumpS = document.getElementById("jumpS");
+const hitS = document.getElementById("hitS");
+const btnS = document.getElementById("btnS");
+const bgm = document.getElementById("bgm");
+
+let ground = 420, gravity = 0.8, jumpPower = -14;
+let started = false, gameOver = false;
+
+let score = 0;
+let highScore = localStorage.getItem("highScore") || 0;
+let scoreTimer = 0;   // ⭐ NEW: controls score speed
+
+let lives = 3, frame = 0;
+
+// Player
+let p = { x: 90, y: ground, dy: 0, w: 22, h: 40 };
+
+// Blocks
+let blockGap = 260;
+let blocks = [];
+for(let i=0;i<4;i++) blocks.push({ x: 360 + i*blockGap });
+
+// Trees & snow
+let trees = [40,120,200,300];
+let snow = [];
+for(let i=0;i<80;i++)
+  snow.push({ x:Math.random()*360, y:Math.random()*520, s:Math.random()*2+1 });
+
+// Restart button
+let restartBtn = { x:120, y:20, w:120, h:36 };
+
+// Input
+c.addEventListener("mousedown", tap);
+c.addEventListener("touchstart", tap);
+
+function tap(e){
+  let r = c.getBoundingClientRect();
+  let x = (e.touches?e.touches[0].clientX:e.clientX) - r.left;
+  let y = (e.touches?e.touches[0].clientY:e.clientY) - r.top;
+
+  if(gameOver){
+    if(x>restartBtn.x && x<restartBtn.x+restartBtn.w &&
+       y>restartBtn.y && y<restartBtn.y+restartBtn.h){
+      btnS.play();
+      restart();
+      return;
+    }
+  }
+
+  if(!started){
+    started = true;
+    bgm.volume = 0.3;
+    bgm.play();
+    return;
+  }
+
+  if(p.y >= ground){
+    p.dy = jumpPower;
+    jumpS.currentTime = 0;
+    jumpS.play();
+  }
+}
+
+// Sky
+function sky(){
+  ctx.fillStyle="#87ceeb";
+  ctx.fillRect(0,0,360,520);
+}
+
+// Mountains
+function mountains(){
+  [0,160,320].forEach(mx=>{
+    ctx.fillStyle="#546e7a";
+    ctx.beginPath();
+    ctx.moveTo(mx,ground);
+    ctx.lineTo(mx+80,ground-230);
+    ctx.lineTo(mx+160,ground);
+    ctx.fill();
+
+    ctx.fillStyle="#90a4ae";
+    ctx.beginPath();
+    ctx.moveTo(mx+40,ground);
+    ctx.lineTo(mx+80,ground-180);
+    ctx.lineTo(mx+120,ground);
+    ctx.fill();
+
+    ctx.fillStyle="#fff";
+    ctx.beginPath();
+    ctx.moveTo(mx+65,ground-160);
+    ctx.lineTo(mx+80,ground-230);
+    ctx.lineTo(mx+95,ground-160);
+    ctx.fill();
+  });
+}
+
+// Trees
+function drawTrees(){
+  trees.forEach(tx=>{
+    ctx.fillStyle="#5d4037";
+    ctx.fillRect(tx,ground-60,14,60);
+
+    ctx.fillStyle="#2e7d32";
+    ctx.beginPath();
+    ctx.arc(tx+7,ground-70,26,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle="#66bb6a";
+    ctx.beginPath();
+    ctx.arc(tx+7,ground-95,20,0,Math.PI*2);
+    ctx.fill();
+  });
+}
+
+// Falling snow
+function drawSnow(){
+  ctx.fillStyle="white";
+  snow.forEach(s=>{
+    s.y += s.s;
+    if(s.y > 520){ s.y = 0; s.x = Math.random()*360; }
+    ctx.beginPath();
+    ctx.arc(s.x,s.y,s.s,0,Math.PI*2);
+    ctx.fill();
+  });
+}
+
+// Ground with snow
+function groundDraw(){
+  ctx.fillStyle="#fff";
+  ctx.fillRect(0,ground-4,360,6);
+  ctx.fillStyle="#43a047";
+  ctx.fillRect(0,ground,360,18);
+  ctx.fillStyle="#5d4037";
+  ctx.fillRect(0,ground+18,360,82);
+}
+
+// Blocks
+function drawBlocks(){
+  blocks.forEach(b=>{
+    ctx.fillStyle="#66bb6a";
+    ctx.fillRect(b.x,ground-22,30,22);
+    ctx.fillStyle="#6d4c41";
+    ctx.fillRect(b.x,ground,30,22);
+
+    if(p.x+p.w/2>b.x && p.x<b.x+30 && p.y+p.h/2>ground-22 && !gameOver){
+      lives--;
+      hitS.play();
+      if(lives<=0){
+        gameOver=true;
+        bgm.pause();
+      }
+      b.x = blocks[blocks.length-1].x + blockGap;
+    }
+
+    if(!gameOver){
+      b.x -= 4;
+      if(b.x < -40) b.x = blocks[blocks.length-1].x + blockGap;
+    }
+  });
+}
+
+// Player with legs
+function player(){
+  frame++;
+  ctx.fillStyle="rgba(0,0,0,0.3)";
+  ctx.beginPath();
+  ctx.ellipse(p.x,ground+10,16,5,0,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="#ffccbc";
+  ctx.beginPath();
+  ctx.arc(p.x,p.y-36,14,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="#000";
+  ctx.beginPath();
+  ctx.arc(p.x-4,p.y-38,2,0,Math.PI*2);
+  ctx.arc(p.x+4,p.y-38,2,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="#2196f3";
+  ctx.fillRect(p.x-10,p.y-16,20,26);
+
+  let run=Math.sin(frame*0.4)*8;
+
+  ctx.strokeStyle="#ffccbc";
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(p.x-8,p.y-6);
+  ctx.lineTo(p.x-16-run,p.y+8);
+  ctx.moveTo(p.x+8,p.y-6);
+  ctx.lineTo(p.x+16+run,p.y+8);
+  ctx.stroke();
+
+  ctx.strokeStyle="#3e2723";
+  ctx.lineWidth=4;
+  ctx.beginPath();
+  ctx.moveTo(p.x-5,p.y+10);
+  ctx.lineTo(p.x-10+run,p.y+30);
+  ctx.moveTo(p.x+5,p.y+10);
+  ctx.lineTo(p.x+10-run,p.y+30);
+  ctx.stroke();
+}
+
+// UI
+function ui(){
+  ctx.fillStyle="white";
+  ctx.font="16px Arial";
+  ctx.fillText("Score: "+score,10,20);
+  ctx.fillText("❤️".repeat(lives),10,40);
+  ctx.fillText("High: "+highScore,240,20);
+
+  if(!started){
+    ctx.font="28px Arial";
+    ctx.fillText("TAP TO START",80,260);
+  }
+
+  if(gameOver){
+    ctx.fillStyle="rgba(0,0,0,0.55)";
+    ctx.fillRect(0,0,360,520);
+
+    ctx.fillStyle="#ff5252";
+    ctx.fillRect(restartBtn.x,restartBtn.y,restartBtn.w,restartBtn.h);
+    ctx.fillStyle="white";
+    ctx.font="18px Arial";
+    ctx.fillText("RESTART",restartBtn.x+18,restartBtn.y+24);
+
+    ctx.font="26px Arial";
+    ctx.fillText("GAME OVER",90,260);
+
+    if(score>highScore){
+      highScore=score;
+      localStorage.setItem("highScore",highScore);
+    }
+  }
+}
+
+// UPDATE (⭐ FIXED SCORE)
+function update(){
+  if(!started || gameOver) return;
+
+  p.dy += gravity;
+  p.y += p.dy;
+  if(p.y > ground){ p.y = ground; p.dy = 0; }
+
+  scoreTimer++;
+  if(scoreTimer >= 60){   // 1 second
+    score++;
+    scoreTimer = 0;
+  }
+}
+
+// Restart
+function restart(){
+  score = 0;
+  scoreTimer = 0;
+  lives = 3;
+  gameOver = false;
+  p.y = ground;
+  bgm.play();
+}
+
+// Loop
+function loop(){
+  sky();
+  mountains();
+  drawTrees();
+  drawSnow();
+  groundDraw();
+  drawBlocks();
+  update();
+  player();
+  ui();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
